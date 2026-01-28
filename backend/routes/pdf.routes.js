@@ -25,12 +25,12 @@ router.post("/process-pdf", upload.single("pdf"), async (req, res) => {
     const imagePaths = await pdfToImages(pdfPath, imageDir);
 
     // 2) Gemini Extract
-    // console.log("Gemini Extracting...");
-    // const allRows = await geminiExtract(imagePaths);
+    console.log("Gemini Extracting...");
+    const allRows = await geminiExtract(imagePaths);
     
     // 2) OpenAI Extract
-    console.log("OpenAI Extracting...");
-    const allRows = await openaiExtract(imagePaths);
+    // console.log("OpenAI Extracting...");
+    // const allRows = await openaiExtract(imagePaths);
 
     // 3) Export Excel
     outputFilePath = await excelExport(allRows);

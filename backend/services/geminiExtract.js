@@ -66,10 +66,11 @@ CRITICAL RULES:
 - DO NOT convert units or currencies.
 - Missing values → empty string.
 - ONE product variant = ONE row.
-- Page number = actual PDF page number (first image of this batch = page ${batchIndex * BATCH_SIZE + 1 }).
+- Page number = actual PDF page number (first image of this batch = page ${batchIndex * BATCH_SIZE + 1}).
+- length_cm, breath_cm, height_cm, seat_height_cm must contain ONLY numeric value if available.
 
 PRICE RULES:
-- Return price as STRING exactly as shown (e.g. "€ 2450", "$120").
+- Return price as STRING exactly as shown (e.g. "€ 2450", "$120") Or only numeric if PDF shows numeric only.
 
 DIMENSION RULES:
 - Split numeric value and unit.
@@ -78,38 +79,33 @@ RETURN FORMAT (STRICT JSON ARRAY):
 [
   {
     "brand_name": "",
-    "product_code": "",
     "product_name": "",
-    "product_type": "",
-    "description": "",
-    "variant_code": "",
-    "variant_details": "",
+    "furniture_type": "",
+    "design": "",
+    "product_code": "",
+    "system_code": "",
+    "length_cm": "",
+    "breath_cm": "",
+    "height_cm": "",
+    "seat_height_cm": "",
     "upholstery": "",
-    "materials": "",
-    "height_value": "",
-    "height_unit": "",
-    "length_value": "",
-    "length_unit": "",
-    "breadth_value": "",
-    "breadth_unit": "",
-    "seat_height_value": "",
-    "seat_height_unit": "",
-    "diameter_value": "",
-    "diameter_unit": "",
-    "weight_value": "",
-    "weight_unit": "",
-    "volume_value": "",
-    "volume_unit": "",
     "currency": "",
     "price": "",
-    "page_number": 0
+    "other_material_comments": "",
+    "special_feature": "",
+    "additional_price": "",
+    "cbm": "",
+    "product_weight_kg": "",
+    "remark": "",
+    "initials": "",
+    "date": "",
   }
 ]
 
 FINAL CONSTRAINT:
 - Never fabricate.
 - Never merge rows.
-- Output ONLY JSON array.
+- Output ONLY JSON array, No markdown, No extra text.
     `.trim();
 
     const result = await ai.models.generateContent({
@@ -126,8 +122,10 @@ FINAL CONSTRAINT:
 
     const responseText = extractGeminiText(result);
 
+    console.log(responseText);
+
     if (!responseText) {
-      console.error(` No readable Gemini output for batch ${batchIndex}`);
+      console.error(`No readable Gemini output for batch ${batchIndex}`);
       continue;
     }
 
@@ -151,7 +149,33 @@ FINAL CONSTRAINT:
     }
 
     if (Array.isArray(batchRows) && batchRows.length > 0) {
-      allRows.push(...batchRows);
+      // allRows.push(...batchRows);
+
+      const normalized = batchRows.map((row) => ({
+        brand_name: row.brand_name ?? "",
+        product_name: row.product_name ?? "",
+        furniture_type: row.furniture_type ?? "",
+        design: row.design ?? "",
+        product_code: row.product_code ?? "",
+        system_code: row.system_code ?? "",
+        length_cm: row.length_cm ?? "",
+        breath_cm: row.breath_cm ?? "",
+        height_cm: row.height_cm ?? "",
+        seat_height_cm: row.seat_height_cm ?? "",
+        upholstery: row.upholstery ?? "",
+        currency: row.currency ?? "",
+        price: row.price ?? "",
+        other_material_comments: row.other_material_comments ?? "",
+        special_feature: row.special_feature ?? "",
+        additional_price: row.additional_price ?? "",
+        cbm: row.cbm ?? "",
+        product_weight_kg: row.product_weight_kg ?? "",
+        remark: row.remark ?? "",
+        initials: row.initials ?? "",
+        date: row.date ?? "",
+      }));
+
+      allRows.push(...normalized);
     }
   }
 
