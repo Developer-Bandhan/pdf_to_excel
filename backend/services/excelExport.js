@@ -1,16 +1,13 @@
 const ExcelJS = require("exceljs");
 const fs = require("fs-extra");
 
-async function excelExport(allRows) {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Products");
-
+function setColumns(sheet) {
   sheet.columns = [
     { header: "Brand Name", key: "brand_name", width: 20 },
     { header: "Product Code", key: "product_code", width: 18 },
     { header: "Product Name", key: "product_name", width: 30 },
     { header: "Product Type", key: "product_type", width: 18 },
-    { header: "Description", key: "description", width: 35 },
+    { header: "Description", key: "description", width: 50 },
 
     { header: "Variant Code", key: "variant_code", width: 18 },
     { header: "Variant Details", key: "variant_details", width: 30 },
@@ -36,15 +33,20 @@ async function excelExport(allRows) {
     { header: "Price", key: "price", width: 14 },
     { header: "Page Number", key: "page_number", width: 12 },
   ];
+}
 
-  allRows.forEach((row) => sheet.addRow(row));
+async function excelExportSingle(rows, filePrefix) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Products");
+  setColumns(sheet);
+
+  rows.forEach((row) => sheet.addRow(row));
 
   await fs.ensureDir("outputs");
-  const outputFilePath = `outputs/Data_${Date.now()}.xlsx`;
-
+  const outputFilePath = `outputs/${filePrefix}_${Date.now()}.xlsx`;
   await workbook.xlsx.writeFile(outputFilePath);
 
   return outputFilePath;
 }
 
-module.exports = excelExport;
+module.exports = excelExportSingle;

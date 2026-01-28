@@ -102,9 +102,10 @@ FINAL CONSTRAINT:
         });
 
 
-        console.log(response);
 
         const responseText = response?.choices?.[0]?.message?.content?.trim();
+
+        console.log("OpenAI response:", responseText);
 
         if (!responseText) {
             console.log(`No OpenAI output for batch ${batchIndex}`);

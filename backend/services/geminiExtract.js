@@ -122,9 +122,10 @@ FINAL CONSTRAINT:
       ],
     });
 
-    console.log(result);
 
     const responseText = extractGeminiText(result);
+
+    console.log("Gemini response:", responseText);
 
     if (!responseText) {
       console.error(` No readable Gemini output for batch ${batchIndex}`);
