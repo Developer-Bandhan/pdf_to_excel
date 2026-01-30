@@ -5,7 +5,7 @@ const { exec } = require("child_process");
 function pdfToImages(pdfPath, outputDir) {
   return new Promise((resolve, reject) => {
     const outputPrefix = path.join(outputDir, "page");
-    const command = `pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`;
+    const command = `pdftoppm -png -r 300 "${pdfPath}" "${outputPrefix}"`;
 
     exec(command, async (error) => {
       if (error) return reject(error);

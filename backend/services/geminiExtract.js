@@ -37,7 +37,7 @@ function extractGeminiText(result) {
 }
 
 async function geminiExtract(imagePaths) {
-  const BATCH_SIZE = 8;
+  const BATCH_SIZE = 1;
   const batches = chunkArray(imagePaths, BATCH_SIZE);
 
   let allRows = [];
@@ -46,8 +46,15 @@ async function geminiExtract(imagePaths) {
     const batch = batches[batchIndex];
 
     const imageParts = [];
-    for (const imgPath of batch) {
+
+    for (let i = 0; i < batch.length; i++) {
+      const imgPath = batch[i];
+      const pageNo = batchIndex * BATCH_SIZE + i + 1;
+
       const buffer = await fs.readFile(imgPath);
+
+      imageParts.push({ text: `PAGE_NUMBER: ${pageNo}` });
+
       imageParts.push({
         inlineData: {
           data: buffer.toString("base64"),
@@ -55,6 +62,16 @@ async function geminiExtract(imagePaths) {
         },
       });
     }
+
+    // for (const imgPath of batch) {
+    //   const buffer = await fs.readFile(imgPath);
+    //   imageParts.push({
+    //     inlineData: {
+    //       data: buffer.toString("base64"),
+    //       mimeType: "image/png",
+    //     },
+    //   });
+    // }
 
     const prompt = `
 You are extracting structured product data from a batch of pages of the SAME PDF document.
@@ -70,7 +87,8 @@ CRITICAL RULES:
 - length_cm, breath_cm, height_cm, seat_height_cm must contain ONLY numeric value if available.
 
 PRICE RULES:
-- Return price as STRING exactly as shown (e.g. "€ 2450", "$120") Or only numeric if PDF shows numeric only.
+- Detect currency from symbol/text and store in "currency" (USD/EURO/INR/GBP/UNKNOWN).
+- Return "price" as numeric-only string (no symbol, no commas, no spaces).
 
 DIMENSION RULES:
 - Split numeric value and unit.
@@ -122,7 +140,7 @@ FINAL CONSTRAINT:
 
     const responseText = extractGeminiText(result);
 
-    console.log(responseText);
+    // console.log(responseText);
 
     if (!responseText) {
       console.error(`No readable Gemini output for batch ${batchIndex}`);
@@ -177,6 +195,11 @@ FINAL CONSTRAINT:
 
       allRows.push(...normalized);
     }
+
+    // if (Array.isArray(batchRows) && batchRows.length > 0) {
+    //   allRows.push(...batchRows);
+    // }
+
   }
 
   return allRows;
