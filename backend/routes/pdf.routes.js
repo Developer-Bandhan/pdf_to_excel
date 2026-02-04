@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs-extra");
 
-const pdfToImages = require("../services/pdfToImages");
+const pdfToImages = require("../services/pdfToImages.js");
 const excelExport = require("../services/excelExport");
 const geminiExtract = require("../services/geminiExtract");
 const openaiExtract = require("../services/openaiExtract.js")
