@@ -37,7 +37,7 @@ async function excelExport(allRows) {
       furniture_type: row.furniture_type ?? "",
       design: row.design ?? "",
       product_code: row.product_code ?? "",
-      variant: row.variant ?? "",
+     
       system_code: row.system_code ?? "",
       length_cm: row.length_cm ?? "",
       breath_cm: row.breath_cm ?? "",

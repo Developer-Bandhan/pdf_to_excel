@@ -110,7 +110,7 @@ Return STRICT JSON array ONLY:
     "furniture_type": "",
     "design": "",
     "product_code": "",
-    "variant": "",
+   
     "system_code": "",
     "length_cm": "",
     "breath_cm": "",
