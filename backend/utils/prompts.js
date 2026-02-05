@@ -9,6 +9,7 @@ For each page image, return JSON array.
 Classes:
 - FRONT_MATTER
 - INDEX_PAGE
+- CODE_IMAGE_ONLY
 - TECH_INFO_ONLY
 - UPHOLSTERY_LIST
 - VARIANT_PRICE_TABLE
@@ -22,6 +23,8 @@ Rules:
 - if cover page contains a clear catalog brand name, set brand_name, Otherwise brand_name="".
 - if page is a table of contents / index / elenco / indice, if it contains many product/model names with page numbers -> INDEX_PAGE.
 - If page has product codes + price table -> MODULAR_UNIT_TABLE or VARIANT_PRICE_TABLE or COMPOSITION_TABLE.
+- If page has only product drawings/images with codes/dimensions and NO prices/categories -> CODE_IMAGE_ONLY.
+- CODE_IMAGE_ONLY pages must have has_extractable_data=false.
 - If page lists fabrics/leathers categories -> UPHOLSTERY_LIST.
 - If page is code/description/price list text-like -> SIMPLE_TEXT_LIST.
 - If cover/index/terms/contact -> FRONT_MATTER.
@@ -55,6 +58,7 @@ Output format:
   "extract": {
     "FRONT_MATTER": [],
     "INDEX_PAGE": [],
+    "CODE_IMAGE_ONLY": [],
     "UPHOLSTERY_LIST": [],
     "MODULAR_UNIT_TABLE": [],
     "COMPOSITION_TABLE": [],
@@ -70,13 +74,14 @@ Rules:
 - Put pages with has_extractable_data=false into skip_pages.
 - DO NOT extract INDEX_PAGE, FRONT_MATTER, BLANK_PAGE.
 - UNKNOWN pages must be added to skip_pages (do not extract).
+- DO NOT extract CODE_IMAGE_ONLY (skip_pages).
 
 Return ONLY JSON.
   `.trim(),
 
 
 
-  GENERIC_EXTRACTOR: ({ pageNo }) => `
+  GENERIC_EXTRACTOR:`
 You are extracting structured product data from ONE PDF page image.
 
 CRITICAL RULES:
@@ -84,6 +89,24 @@ CRITICAL RULES:
 - DO NOT guess, infer, calculate, or merge across pages.
 - Missing values -> empty string.
 - ONE product variant = ONE row.
+- Extract data strictly page-wise.
+- NEVER merge data across pages.
+
+ROW SPLIT RULES:
+- Never merge multiple product codes in one row.
+- If codes appear as "A/B", "A,B", "A or B", or Left/Right (sx/dx), output separate rows (one row per product code).
+- Left & Right versions must be 2 rows; variant should mention Left/Right if visible.
+- If same code has multiple categories/grades/prices, create multiple rows (one per category/price).
+
+Numeric rules:
+- length_cm, breath_cm, height_cm, seat_height_cm -> numeric-only strings.
+
+PRICE RULES:
+- currency: USD/EURO/INR/GBP/UNKNOWN
+- price: string; digits + optional single decimal point only (no symbols/spaces)
+- If the visible price contains a decimal point ".", MUST keep it in output (do not remove ".")
+- Remove commas only (e.g., "3,234.50" -> "3234.50")
+
 
 FORBIDDEN FIELDS (must ALWAYS be empty string):
 - design
@@ -94,14 +117,6 @@ FORBIDDEN FIELDS (must ALWAYS be empty string):
 Never generate or infer these fields even if you can guess.
 
 
-Numeric rules:
-- length_cm, breath_cm, height_cm, seat_height_cm -> numeric-only strings.
-
-PRICE RULES:
-- currency: USD/EURO/INR/GBP/UNKNOWN
-- price: string; digits + optional single decimal point only (no symbols/spaces), keep "." decimals, remove commas
-
-
 Return STRICT JSON array ONLY:
 [
   {
@@ -110,7 +125,6 @@ Return STRICT JSON array ONLY:
     "furniture_type": "",
     "design": "",
     "product_code": "",
-   
     "system_code": "",
     "length_cm": "",
     "breath_cm": "",

@@ -7,6 +7,10 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
+
+const CLASS_BATCH_SIZE = 5;
+const EXTRACT_BATCH_SIZE = 1;
+
 // Split array into chunks
 function chunkArray(arr, size) {
   const chunks = [];
@@ -67,7 +71,7 @@ function extractStrictJson(text) {
 }
 
 
-async function generateJsonWithRetry({ model, parts, maxAttempts = 2 }) {
+async function generateJsonWithRetry({ model, parts, maxAttempts = 1 }) {
   let last = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -103,7 +107,7 @@ async function generateJsonWithRetry({ model, parts, maxAttempts = 2 }) {
 }
 
 async function classifyPages(imageParts) {
-  const CLASS_BATCH_SIZE = 5;
+
   const batches = chunkArray(imageParts, CLASS_BATCH_SIZE);
 
   const results = [];
@@ -135,7 +139,7 @@ async function classifyPages(imageParts) {
     const jsonText = await generateJsonWithRetry({
       model: process.env.GEMINI_CLASSIFIER_MODEL,
       parts,
-      maxAttempts: 2
+      maxAttempts: 1
     });
 
     console.log("jsonText from classifyPages", jsonText);
@@ -149,21 +153,21 @@ async function classifyPages(imageParts) {
       continue;
     }
 
-    if(!globalBrandName && parsed?.brand_name) {
+    if (!globalBrandName && parsed?.brand_name) {
       globalBrandName = parsed.brand_name.trim();
     }
 
     const pages = parsed?.pages;
-    if(Array.isArray(pages)) {
-      for(const x of pages) {
-        if(x?.page_number) results.push(x);
+    if (Array.isArray(pages)) {
+      for (const x of pages) {
+        if (x?.page_number) results.push(x);
       }
     }
   }
 
   results.sort((a, b) => (a.page_number || 0) - (b.page_number || 0));
 
-  return {classifications: results, brand_name: globalBrandName};
+  return { classifications: results, brand_name: globalBrandName };
 
 }
 
@@ -176,7 +180,7 @@ async function buildExtractionPlan(classifications) {
   const jsonText = await generateJsonWithRetry({
     model: process.env.GEMINI_PLANNER_MODEL,
     parts,
-    maxAttempts: 2
+    maxAttempts: 1
   });
 
   console.log("jsonText from buildExtractionPlan", jsonText);
@@ -185,20 +189,22 @@ async function buildExtractionPlan(classifications) {
     const allPages = classifications.map((c) => c.page_number);
 
     return {
-      template_family: "FALLBACK_ALL_PAGES",
-      skip_pages: [],
+      template_family: "FALLBACK_SKIP_ALL",
+      skip_pages: allPages,
       extract: {
         FRONT_MATTER: [],
         INDEX_PAGE: [],
+        CODE_IMAGE_ONLY: [],
+        TECH_INFO_ONLY: [],
         UPHOLSTERY_LIST: [],
         MODULAR_UNIT_TABLE: [],
         COMPOSITION_TABLE: [],
         VARIANT_PRICE_TABLE: [],
         SIMPLE_TEXT_LIST: [],
         BLANK_PAGE: [],
-        UNKNOWN: allPages,
+        UNKNOWN: [],
       },
-      notes: "Fallback plan used"
+      notes: "Fallback triggered: Page classification or extraction planning failed. To ensure data accuracy, all pages were skipped because no page could be confidently identified as containing extractable product rows."
     };
   }
 
@@ -213,6 +219,7 @@ function normalizeRow(row) {
     furniture_type: row.furniture_type ?? "",
     design: row.design ?? "",
     product_code: row.product_code ?? "",
+    // variant: row.variant ?? "",
     system_code: row.system_code ?? "",
     length_cm: row.length_cm ?? "",
     breath_cm: row.breath_cm ?? "",
@@ -232,36 +239,81 @@ function normalizeRow(row) {
   }
 }
 
-async function extractPageRowsGeneric(imgpath, pageNo) {
-  const buffer = await fs.readFile(imgpath);
+// async function extractPageRowsGeneric(imgpath, pageNo) {
+//   const buffer = await fs.readFile(imgpath);
 
-  const prompt = prompts.GENERIC_EXTRACTOR({ pageNo });
+//   const prompt = prompts.GENERIC_EXTRACTOR({ pageNo });
 
-  const parts = [
-    { text: prompt },
-    { text: `PAGE_NUMBER: ${pageNo}` },
-    {
+//   const parts = [
+//     { text: prompt },
+//     { text: `PAGE_NUMBER: ${pageNo}` },
+//     {
+//       inlineData: {
+//         data: buffer.toString("base64"),
+//         mimeType: "image/png",
+//       },
+//     }
+//   ];
+
+//   const jsonText = await generateJsonWithRetry({
+//     model: process.env.GEMINI_MODEL,
+//     parts,
+//     maxAttempts: 2
+//   });
+
+//   // console.log("jsonText from extractPageRowsGeneric", jsonText);
+
+//   if (!jsonText) return [];
+
+//   const strict = extractStrictJson(jsonText);
+//   if (!strict) return [];
+
+//   const parsed = JSON.parse(strict);
+//   if (!Array.isArray(parsed)) return [];
+
+//   return parsed.map(normalizeRow);
+// }
+
+
+
+async function extractPageRowsGeneric(pages) {
+
+  const parts = [];
+
+  parts.push({
+    text: prompts.GENERIC_EXTRACTOR
+  });
+
+  for (const { imgPath, pageNo } of pages) {
+    const buffer = await fs.readFile(imgPath);
+
+    parts.push({ text: `PAGE_NUMBER: ${pageNo}` });
+    parts.push({
       inlineData: {
         data: buffer.toString("base64"),
         mimeType: "image/png",
-      },
-    }
-  ];
+      }
+    });
+  }
 
   const jsonText = await generateJsonWithRetry({
     model: process.env.GEMINI_MODEL,
     parts,
-    maxAttempts: 2
+    maxAttempts: 1
   });
-
-  // console.log("jsonText from extractPageRowsGeneric", jsonText);
 
   if (!jsonText) return [];
 
   const strict = extractStrictJson(jsonText);
   if (!strict) return [];
 
-  const parsed = JSON.parse(strict);
+  let parsed;
+  try {
+    parsed = JSON.parse(strict);
+  } catch (error) {
+    return [];
+  }
+
   if (!Array.isArray(parsed)) return [];
 
   return parsed.map(normalizeRow);
@@ -270,7 +322,7 @@ async function extractPageRowsGeneric(imgpath, pageNo) {
 
 async function geminiExtractPDF(imagePaths) {
 
-  const {classifications, brand_name} = await classifyPages(imagePaths);
+  const { classifications, brand_name } = await classifyPages(imagePaths);
 
   const plan = await buildExtractionPlan(classifications);
 
@@ -286,12 +338,18 @@ async function geminiExtractPDF(imagePaths) {
 
   const allRows = [];
 
-  for (const pageNo of [...extractPages].sort((a, b) => a - b)) {
-    const imgPath = imagePaths[pageNo - 1];
+  const extractPageList = [...extractPages]
+    .sort((a, b) => a - b)
+    .map((pageNo) => ({
+      pageNo,
+      imgPath: imagePaths[pageNo - 1],
+    }))
+    .filter((x) => x.imgPath);
 
-    if (!imgPath) continue;
+  const batches = chunkArray(extractPageList, EXTRACT_BATCH_SIZE);
 
-    const rows = await extractPageRowsGeneric(imgPath, pageNo);
+  for (const batch of batches) {
+    const rows = await extractPageRowsGeneric(batch);
 
     const patchedRows = rows.map((row) => ({
       ...row,
@@ -300,6 +358,7 @@ async function geminiExtractPDF(imagePaths) {
 
     allRows.push(...patchedRows);
   }
+
 
   return allRows;
 }
