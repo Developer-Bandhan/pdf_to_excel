@@ -72,7 +72,7 @@ Output format:
 
 Rules:
 - Put pages with has_extractable_data=false into skip_pages.
-- DO NOT extract INDEX_PAGE, FRONT_MATTER, BLANK_PAGE.
+- DO NOT extract INDEX_PAGE, FRONT_MATTER, BLANK_PAGE, UPHOLSTERY_LIST.
 - UNKNOWN pages must be added to skip_pages (do not extract).
 - DO NOT extract CODE_IMAGE_ONLY (skip_pages).
 
@@ -81,7 +81,7 @@ Return ONLY JSON.
 
 
 
-  GENERIC_EXTRACTOR:`
+  GENERIC_EXTRACTOR: `
 You are extracting structured product data from ONE PDF page image.
 
 CRITICAL RULES:
@@ -91,6 +91,24 @@ CRITICAL RULES:
 - ONE product variant = ONE row.
 - Extract data strictly page-wise.
 - NEVER merge data across pages.
+- Must extract each product details don't skip any product variant.
+
+PRODUCT CODE RULES:
+- if product code is visible, extract it.
+- if product code is not available, product_code=""
+
+PRODUCT NAME RULES:
+- If product name contains multiple languages separated by "/", keep ONLY the ENGLISH name.
+  Example: "Poltrona / Armchair" → "Armchair"
+
+- If product name contains dimensions or numbers, REMOVE the size part and keep ONLY the name.
+  Example: "Sofa - 168 cm" → "Sofa"
+
+- REMOVE units (cm, mm, m, inch, ", ') ONLY when they appear with numbers.
+
+- If product name is already clean (no numbers, no dimensions, no language variants),
+  KEEP it unchanged.
+
 
 ROW SPLIT RULES:
 - Never merge multiple product codes in one row.
@@ -102,10 +120,11 @@ Numeric rules:
 - length_cm, breath_cm, height_cm, seat_height_cm -> numeric-only strings.
 
 PRICE RULES:
-- currency: USD/EURO/INR/GBP/UNKNOWN
+- currency: USD/EURO/INR/GBP
+- if currency is not visible, currency=""
 - price: string; digits + optional single decimal point only (no symbols/spaces)
 - If the visible price contains a decimal point ".", MUST keep it in output (do not remove ".")
-- Remove commas only (e.g., "3,234.50" -> "3234.50")
+- if the price showing with decimal point ".", show it as it is. (5.794)
 
 
 FORBIDDEN FIELDS (must ALWAYS be empty string):
