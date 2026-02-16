@@ -21,12 +21,14 @@ Classes:
 
 Rules:
 - if cover page contains a clear catalog brand name, set brand_name, Otherwise brand_name="".
-- if page is a table of contents / index / elenco / indice, if it contains many product/model names with page numbers -> INDEX_PAGE.
+- if page is a table of contents / index / elenco / indice, if it contains many product names with page numbers -> INDEX_PAGE.
 - If page has product codes + price table -> MODULAR_UNIT_TABLE or VARIANT_PRICE_TABLE or COMPOSITION_TABLE.
 - If page has only product drawings/images with codes/dimensions and NO prices/categories -> CODE_IMAGE_ONLY.
 - CODE_IMAGE_ONLY pages must have has_extractable_data=false.
+- Pages containing numeric finish codes + color/material names but NO prices and NO product models -> UPHOLSTERY_LIST.
 - If page lists fabrics/leathers categories -> UPHOLSTERY_LIST.
-- If page is code/description/price list text-like -> SIMPLE_TEXT_LIST.
+- if page don't have any product code, description and price, if only have page number and product name it is not SIMPLE_TEXT_LIST (it is UPHOLSTERY_LIST).
+- If page is code/description/ product price list text-like -> SIMPLE_TEXT_LIST. 
 - If cover/index/terms/contact -> FRONT_MATTER.
 - if page is a blank page -> BLANK_PAGE.
 - If not sure -> UNKNOWN.
@@ -93,21 +95,41 @@ CRITICAL RULES:
 - NEVER merge data across pages.
 - Must extract each product details don't skip any product variant.
 
+BRAND NAME RULE:
+Brand name is provided externally at document level.
+Always return:
+"brand_name": ""
+Do NOT extract brand name from this page.
+
+
+
 PRODUCT CODE RULES:
 - if product code is visible, extract it.
 - if product code is not available, product_code=""
 
-PRODUCT NAME RULES:
-- If product name contains multiple languages separated by "/", keep ONLY the ENGLISH name.
-  Example: "Poltrona / Armchair" → "Armchair"
+PRODUCT NAME EXTRACTION PRIORITY (STRICT ORDER):
 
-- If product name contains dimensions or numbers, REMOVE the size part and keep ONLY the name.
-  Example: "Sofa - 168 cm" → "Sofa"
+1. If product code exists:
+   - Find the nearest bold/large heading immediately above that code block.
+   - That heading is product_name.
 
-- REMOVE units (cm, mm, m, inch, ", ') ONLY when they appear with numbers.
+2. If multiple uppercase headings exist:
+   - Ignore generic section titles like:
+     "NEW PRODUCTS", "TABLES", "SIDEBOARDS", "PRICE LIST", "UPDATE", "TECHNICAL INFO".
 
-- If product name is already clean (no numbers, no dimensions, no language variants),
-  KEEP it unchanged.
+3. If format is:
+   NAME | CATEGORY
+   Extract only NAME (before "|").
+
+4. If product name is repeated with dimensions (124 cm):
+   Remove only the dimension part.
+
+5. if product name is repeated with number (123 product name / product name 234)
+   keep as it is 
+
+6. If no clear title is visible above code:
+   product_name=""
+
 
 
 ROW SPLIT RULES:
@@ -167,3 +189,28 @@ Return ONLY JSON.
 };
 
 module.exports = PROMPTS;
+
+
+// - If product name contains multiple languages separated by "/", keep ONLY the ENGLISH name.
+//   Example: "Poltrona / Armchair" → "Armchair"
+
+
+
+// PRODUCT NAME RULES:
+// - If a clear product title or collection name is visible as a heading near the product block,
+//   extract that as product_name.
+
+// - Never use description as product name.
+
+// - If product name contains dimensions or numbers, REMOVE the size part and keep ONLY the name.
+//   Example: "Sofa - 168 cm" → "Sofa"
+
+// - REMOVE units (cm, mm, m, inch, ", ') ONLY when they appear with numbers.
+
+// - If product name is already clean (no numbers, no dimensions, no language variants),
+//   KEEP it unchanged.
+
+
+// BRAND NAME RULES:
+// - if brand name is visible, extract it.
+// - if brand name is not available, brand_name=""

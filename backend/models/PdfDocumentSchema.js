@@ -17,7 +17,10 @@ const pdfDocumentSchema = new mongoose.Schema({
         type: String,
         enum: ["UPLOADED", "PROCESSING", "COMPLETED", "FAILED"],
         default: "UPLOADED"
-    }
+    },
+    run1_rows: { type: Number, default: 0 },
+    run2_rows: { type: Number, default: 0 },
+    verified_rows: { type: Number, default: 0 }
 
 }, { timestamps: true });
 

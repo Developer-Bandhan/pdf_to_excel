@@ -85,44 +85,51 @@ function extractStrictJson(text) {
 }
 
 
-async function generateJsonWithRetry({ model, parts, maxAttempts = 1 }) {
+async function generateJsonWithRetry({ model, parts, maxAttempts = 3 }) {
   let last = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const res = await ai.models.generateContent({
-      model,
-      contents: [{ role: "user", parts }],
-    });
-
-    console.log("res", res);
-
-    trackTokens(model, res.usageMetadata);
-
-    sendEvent("token_update", getTokenUsage());
-    sendEvent("model_call", { model, usage: res.usageMetadata });
-
-    console.log(model, res.usageMetadata);
-
-    const text = extractGeminiText(res);
-    sendEvent("thoughts", { model, text: "Raw response received..." }); // You could send 'text' here if you want to show raw output
-
-    last = text;
-    if (!text) continue;
-
-    const cleaned = extractStrictJson(text);
-    if (!cleaned) continue;
-
-
     try {
-      JSON.parse(cleaned);
-      return cleaned;
+      const res = await ai.models.generateContent({
+        model,
+        contents: [{ role: "user", parts }],
+      });
+
+      trackTokens(model, res.usageMetadata);
+      sendEvent("token_update", getTokenUsage());
+      sendEvent("model_call", { model, usage: res.usageMetadata });
+
+      const text = extractGeminiText(res);
+      sendEvent("thoughts", { model, text: `Raw response received (Attempt ${attempt})...` });
+
+      last = text;
+      if (!text) continue;
+
+      const cleaned = extractStrictJson(text);
+      if (!cleaned) continue;
+
+      try {
+        JSON.parse(cleaned);
+        return cleaned;
+      } catch (err) {
+        parts = [
+          {
+            text: "Fix the following into STRICT valid JSON only. No markdown, no extra text."
+          },
+          { text: cleaned }
+        ];
+      }
     } catch (err) {
-      parts = [
-        {
-          text: "Fix the following into STRICT valid JSON only. No markdown, no extra text."
-        },
-        { text: cleaned }
-      ];
+      console.error(`Gemini Call Error (Attempt ${attempt}/${maxAttempts}): ${err.message}`);
+
+      if (attempt === maxAttempts) {
+        sendEvent("log", `Max attempts reached. Failed to get response from Gemini.`);
+        return null;
+      }
+
+      const waitTime = 2000 * attempt;
+      sendEvent("log", `Network issue? Retrying in ${waitTime / 1000}s...`);
+      await new Promise(r => setTimeout(r, waitTime));
     }
   }
 
@@ -162,7 +169,7 @@ async function classifyPages(imageParts) {
     const jsonText = await generateJsonWithRetry({
       model: process.env.GEMINI_CLASSIFIER_MODEL,
       parts,
-      maxAttempts: 1
+      maxAttempts: 3
     });
 
     console.log("jsonText from classifyPages", jsonText);
@@ -204,7 +211,7 @@ async function buildExtractionPlan(classifications) {
   const jsonText = await generateJsonWithRetry({
     model: process.env.GEMINI_PLANNER_MODEL,
     parts,
-    maxAttempts: 1
+    maxAttempts: 3
   });
 
   console.log("jsonText from buildExtractionPlan", jsonText);
@@ -265,50 +272,36 @@ function normalizeRow(row) {
   }
 }
 
-// async function extractPageRowsGeneric(imgpath, pageNo) {
-//   const buffer = await fs.readFile(imgpath);
-
-//   const prompt = prompts.GENERIC_EXTRACTOR({ pageNo });
-
-//   const parts = [
-//     { text: prompt },
-//     { text: `PAGE_NUMBER: ${pageNo}` },
-//     {
-//       inlineData: {
-//         data: buffer.toString("base64"),
-//         mimeType: "image/png",
-//       },
-//     }
-//   ];
-
-//   const jsonText = await generateJsonWithRetry({
-//     model: process.env.GEMINI_MODEL,
-//     parts,
-//     maxAttempts: 2
-//   });
-
-//   // console.log("jsonText from extractPageRowsGeneric", jsonText);
-
-//   if (!jsonText) return [];
-
-//   const strict = extractStrictJson(jsonText);
-//   if (!strict) return [];
-
-//   const parsed = JSON.parse(strict);
-//   if (!Array.isArray(parsed)) return [];
-
-//   return parsed.map(normalizeRow);
-// }
 
 
-
-async function extractPageRowsGeneric(pages) {
+async function extractPageRowsGeneric(pages, brand_name) {
 
   const parts = [];
 
+  // parts.push({
+  //   text: prompts.GENERIC_EXTRACTOR
+  // });
+
+  const brandContext = brand_name
+    ? `
+DOCUMENT CONTEXT:
+Catalog Brand: ${brand_name}
+This brand applies to all products.
+Do NOT detect brand again.
+Always return "brand_name": "".
+`
+    : `
+DOCUMENT CONTEXT:
+Brand name is empty.
+If a clear catalog brand logo or company name is visible,
+extract brand_name ONCE from this page.
+Otherwise return "".
+`;
+
   parts.push({
-    text: prompts.GENERIC_EXTRACTOR
+    text: prompts.GENERIC_EXTRACTOR + brandContext
   });
+
 
   for (const { imgPath, pageNo } of pages) {
     const buffer = await fs.readFile(imgPath);
@@ -325,7 +318,7 @@ async function extractPageRowsGeneric(pages) {
   const jsonText = await generateJsonWithRetry({
     model: process.env.GEMINI_MODEL,
     parts,
-    maxAttempts: 1
+    maxAttempts: 3
   });
 
   // console.log("jsonText from extractPageRowsGeneric", jsonText);
@@ -333,54 +326,47 @@ async function extractPageRowsGeneric(pages) {
   if (!jsonText) return [];
 
   const strict = extractStrictJson(jsonText);
+
+  console.log("RAW STRICT JSON:\n", strict);
+
   if (!strict) return [];
+
 
   let parsed;
   try {
     parsed = JSON.parse(strict);
-  } catch (error) {
+  } catch {
     return [];
   }
 
-  // Fix: Handle case where Gemini wraps response in an object (e.g. { properties: [...] })
-  if (!Array.isArray(parsed) && typeof parsed === 'object') {
-    // try to find an array value
-    const potentialArray = Object.values(parsed).find(v => Array.isArray(v));
-    if (potentialArray) {
-      parsed = potentialArray;
+  // unwrap array safely from any object
+  if (!Array.isArray(parsed)) {
+    const arr = Object.values(parsed).find(v => Array.isArray(v));
+    if (Array.isArray(arr)) {
+      parsed = arr;
     } else {
-      // maybe it's a single object row?
-      parsed = [parsed];
+      return [];
     }
   }
-
-  if (!Array.isArray(parsed)) return [];
 
   return parsed.map(normalizeRow);
 }
 
-
-async function geminiExtractPDF(imagePaths) {
-
-  resetTokenUsage();
-
+async function prepareExtractionContext(imagePaths) {
   const { classifications, brand_name } = await classifyPages(imagePaths);
-
   const plan = await buildExtractionPlan(classifications);
+
+  return { classifications, brand_name, plan };
+}
+
+
+async function extractWithPlan({ imagePaths, plan, brand_name }) {
 
   const extractPages = new Set();
 
-  // for (const key of Object.keys(plan.extract || {})) {
-  //   for (const p of plan.extract[key] || []) extractPages.add(p);
-  // }
-
   for (const [type, pages] of Object.entries(plan.extract || {})) {
     if (NON_EXTRACTABLE_TYPES.has(type)) continue;
-
-    for (const p of pages || []) {
-      if (MANUAL_SKIP_PAGES.has(p)) continue;
-      extractPages.add(p);
-    }
+    for (const p of pages || []) extractPages.add(p);
   }
 
   for (const p of plan.skip_pages || []) {
@@ -391,38 +377,108 @@ async function geminiExtractPDF(imagePaths) {
     for (let i = 1; i <= imagePaths.length; i++) extractPages.add(i);
   }
 
-  const allRows = [];
-
   const extractPageList = [...extractPages]
     .sort((a, b) => a - b)
-    .map((pageNo) => ({
+    .map(pageNo => ({
       pageNo,
-      imgPath: imagePaths[pageNo - 1],
+      imgPath: imagePaths[pageNo - 1]
     }))
-    .filter((x) => x.imgPath);
+    .filter(x => x.imgPath);
 
   const batches = chunkArray(extractPageList, EXTRACT_BATCH_SIZE);
+  const allRows = [];
 
   for (const batch of batches) {
-    sendEvent("log", `Extracting data from batch... (${batch.length} pages)`);
-    const rows = await extractPageRowsGeneric(batch);
+    const rows = await extractPageRowsGeneric(batch, brand_name);
 
-    const patchedRows = rows.map((row) => ({
-      ...row,
-      brand_name: row.brand_name || brand_name || "",
-      page_number: batch[0]?.pageNo ?? null
-    }));
+    if (!brand_name) {
+      const detected = rows.find(r => r.brand_name);
+      if (detected?.brand_name) {
+        brand_name = detected.brand_name.trim();
+        console.log("Brand auto-detected:", brand_name);
+      }
+    }
 
-    allRows.push(...patchedRows);
+    allRows.push(
+      ...rows.map(row => ({
+        ...row,
+        brand_name: row.brand_name || brand_name || "",
+        page_number: batch[0]?.pageNo ?? null
+      }))
+    );
   }
 
-
-  return {
-    rows: allRows,
-    token_usage: getTokenUsage()
-  };
+  return allRows;
 }
 
 
 
-module.exports = geminiExtractPDF;
+// async function geminiExtractPDF(imagePaths) {
+
+//   resetTokenUsage();
+
+//   const { classifications, brand_name } = await classifyPages(imagePaths);
+
+//   const plan = await buildExtractionPlan(classifications);
+
+//   const extractPages = new Set();
+
+//   // for (const key of Object.keys(plan.extract || {})) {
+//   //   for (const p of plan.extract[key] || []) extractPages.add(p);
+//   // }
+
+//   for (const [type, pages] of Object.entries(plan.extract || {})) {
+//     if (NON_EXTRACTABLE_TYPES.has(type)) continue;
+
+//     for (const p of pages || []) {
+//       if (MANUAL_SKIP_PAGES.has(p)) continue;
+//       extractPages.add(p);
+//     }
+//   }
+
+//   for (const p of plan.skip_pages || []) {
+//     extractPages.delete(p);
+//   }
+
+//   if (extractPages.size === 0) {
+//     for (let i = 1; i <= imagePaths.length; i++) extractPages.add(i);
+//   }
+
+//   const allRows = [];
+
+//   const extractPageList = [...extractPages]
+//     .sort((a, b) => a - b)
+//     .map((pageNo) => ({
+//       pageNo,
+//       imgPath: imagePaths[pageNo - 1],
+//     }))
+//     .filter((x) => x.imgPath);
+
+//   const batches = chunkArray(extractPageList, EXTRACT_BATCH_SIZE);
+
+//   for (const batch of batches) {
+//     sendEvent("log", `Extracting data from batch... (${batch.length} pages)`);
+//     const rows = await extractPageRowsGeneric(batch);
+
+//     const patchedRows = rows.map((row) => ({
+//       ...row,
+//       brand_name: row.brand_name || brand_name || "",
+//       page_number: batch[0]?.pageNo ?? null
+//     }));
+
+//     allRows.push(...patchedRows);
+//   }
+
+
+//   return {
+//     rows: allRows,
+//     token_usage: getTokenUsage()
+//   };
+// }
+
+
+module.exports = {
+  prepareExtractionContext,
+  extractWithPlan,
+  extractGeminiText
+};

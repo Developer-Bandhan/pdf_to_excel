@@ -93,9 +93,34 @@ const productRowSchema = new mongoose.Schema({
     date: {
         type: String,
         default: ""
-    }
+    },
+    is_verified: {
+    type: Boolean,
+    default: false
+  }
 }, { timestamps: true });
 
-productRowSchema.index({ pdf_id: 1 });
+productRowSchema.index({ pdf_id: 1, product_code: 1 });
 
-module.exports = mongoose.model("ProductRow", productRowSchema);
+// module.exports = mongoose.model("ProductRow", productRowSchema);
+
+
+module.exports = {
+  ProductRowRun1: mongoose.model(
+    "ProductRowRun1",
+    productRowSchema,
+    "product_rows_run1"
+  ),
+
+  ProductRowRun2: mongoose.model(
+    "ProductRowRun2",
+    productRowSchema,
+    "product_rows_run2"
+  ),
+
+  ProductRowVerified: mongoose.model(
+    "ProductRowVerified",
+    productRowSchema,
+    "product_rows_verified"
+  )
+};

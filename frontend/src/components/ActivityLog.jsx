@@ -3,9 +3,9 @@ import React, { useEffect, useRef } from 'react';
 const ActivityLog = ({ logs }) => {
     const endRef = useRef(null);
 
-    useEffect(() => {
-        endRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs]);
+    // useEffect(() => {
+    //     endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // }, [logs]);
 
     return (
         <div className="bg-gray-900 text-gray-300 font-mono text-sm rounded-xl overflow-hidden shadow-2xl border border-gray-700 flex flex-col h-[500px]">
@@ -48,7 +48,13 @@ const ActivityLog = ({ logs }) => {
 
                             {log.type === 'complete' && (
                                 <div className="p-3 bg-green-900/20 border-l-2 border-green-500 text-green-300 rounded-r mt-2">
-                                    ✓ Process Complete. <a href={log.data.downloadUrl} className="underline hover:text-green-200">Processing file...</a>
+                                    <p className="font-bold mb-1">✓ Process Complete.</p>
+                                    <div className="grid grid-cols-3 gap-2 text-xs mb-2 text-gray-400">
+                                        <div>Run 1: <span className="text-white">{log.data.run1_rows} rows</span></div>
+                                        <div>Run 2: <span className="text-white">{log.data.run2_rows} rows</span></div>
+                                        <div className="font-bold text-green-400">Verified: <span>{log.data.verified_rows} rows</span></div>
+                                    </div>
+                                    <a href={log.data.downloadUrl} className="text-xs underline hover:text-green-200">Processing file...</a>
                                 </div>
                             )}
                         </div>
