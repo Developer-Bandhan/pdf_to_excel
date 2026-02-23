@@ -33,13 +33,46 @@ Rules:
 - if page is a blank page -> BLANK_PAGE.
 - If not sure -> UNKNOWN.
 
+PRODUCT NAME DETECTION (CRITICAL - applies to ALL page types):
+- Even if a page is classified as TECH_INFO_ONLY, CODE_IMAGE_ONLY, or any other non-extractable type,
+  you MUST still detect and return the product_name if a clear product title/model name is visible.
+- product_name: the dominant product model/collection name visible on the page (e.g. "OSLO", "ALBA", "AM002").
+- Do NOT use furniture category words (SOFA, ARMCHAIR, POLTRONA) as product_name.
+- If no clear product name is visible, product_name="".
+
+Also detect layout signals:
+
+- has_large_product_title:
+  true if a dominant large product heading exists.
+
+- has_hero_product_image:
+  true if a large main product photo dominates the page.
+
+first_product_code_appearance:
+  true ONLY if product codes appear together with a clearly new product section
+  or a visually separated product block on THIS page.
+  Do NOT assume continuation from other pages.
+
+
 Return format:
+
 {
   "brand_name": "",
+  "product_family_title": "",
   "pages": [
-  { "page_number": 1, "class": "", "has_extractable_data": true/false, "confidence": 0.0 }
+  {
+    "page_number": 1,
+    "class": "",
+    "product_name": "",
+    "has_extractable_data": true,
+    "confidence": 0.0,
+    "has_large_product_title": true/false,
+    "has_hero_product_image": true/false,
+    "first_product_code_appearance": true/false
+  }
  ]
 }
+
 
 
 Return ONLY JSON.
@@ -78,7 +111,7 @@ Rules:
 - UNKNOWN pages must be added to skip_pages (do not extract).
 - DO NOT extract CODE_IMAGE_ONLY (skip_pages).
 
-Return ONLY JSON.
+Return ONLY JSON.4
   `.trim(),
 
 
@@ -95,6 +128,31 @@ CRITICAL RULES:
 - NEVER merge data across pages.
 - Must extract each product details don't skip any product variant.
 
+
+LANGUAGE RULE:
+All extracted text must be returned in English.
+If any text is in Italian or another language, translate it to English (do not change codes, numbers, or dimensions).
+
+
+CONTEXT AWARENESS RULE:
+A previous product_name may be provided as context from the previous page.
+
+Rules:
+1. If a CLEARLY NEW product title/model name is visible on THIS page (different from context),
+   extract it as product_name for those rows.
+2. If this page is a continuation (no new title visible), return product_name="" for all rows.
+   (The system will auto-fill the previous product_name.)
+3. If BOTH a continuation section AND a new product section exist on this page:
+   - Rows belonging to the continuation: product_name=""
+   - Rows belonging to the new product: product_name=<new name>
+4. NEVER copy the context product_name into the output — always return "" for continuation rows.
+   The system handles backfilling automatically.
+
+
+FURNITURE TYPE RULE:
+- If furniture_type contains descriptive words (e.g., "Large elongated armchair"), extract only the core furniture category (e.g., "ARMCHAIR").
+
+
 BRAND NAME RULE:
 Brand name is provided externally at document level.
 Always return:
@@ -102,34 +160,73 @@ Always return:
 Do NOT extract brand name from this page.
 
 
+PRODUCT FAMILY RULE (CRITICAL):
+
+- Some catalogs contain a PRODUCT FAMILY name
+-displayed only on the main product page.
+
+Category labels such as:
+- POLTRONA, DIVANO, POUFF, PANCA, SOFA, ARMCHAIR, BENCH
+- are NOT product_name.
+
+- These represent furniture_type only.
+
+- If only category labels are visible on this page,
+- DO NOT use them as product_name.
+- Return product_name="".
+
+CATEGORY VS PRODUCT TITLE DISAMBIGUATION (STRICT):
+
+- Words describing furniture type or category
+- must NEVER be treated as product_name.
+
+- Examples of category words:
+POLTRONA, DIVANO, POUFF, PANCA, SOFA,
+ARMCHAIR, BENCH, CHAIR, OTTOMAN.
+
+These must be extracted as furniture_type ONLY.
+
+If such words appear near product codes,
+they are NOT product titles.
+In this case return product_name="".
+
+UPHOLSTERY / MATERIAL RULE:
+- If upholstery, leather, fabric, wood finish, lacquer,
+- veneer, or material finish is visible,
+- extract it into "finish_specification".
+
+NEVER create or output any field named "upholstery".
+
+
 
 PRODUCT CODE RULES:
 - if product code is visible, extract it.
 - if product code is not available, product_code=""
 
-PRODUCT NAME EXTRACTION PRIORITY (STRICT ORDER):
 
-1. If product code exists:
-   - Find the nearest bold/large heading immediately above that code block.
-   - That heading is product_name.
+FINISH CODE RULES:
+- Finish code must NEVER be merged with product_code.
+- If a code clearly refers to finish/material,
+- extract it ONLY into "finish_code".
+- if product code is not available, then product_code=""
 
-2. If multiple uppercase headings exist:
-   - Ignore generic section titles like:
-     "NEW PRODUCTS", "TABLES", "SIDEBOARDS", "PRICE LIST", "UPDATE", "TECHNICAL INFO".
 
-3. If format is:
-   NAME | CATEGORY
-   Extract only NAME (before "|").
 
-4. If product name is repeated with dimensions (124 cm):
-   Remove only the dimension part.
+DIA RULE:
+- Extract only if a circular diameter value explicitly labeled as "D" or "DIA" or "Ø" is visible.
+- Otherwise return "".
 
-5. if product name is repeated with number (123 product name / product name 234)
-   keep as it is 
 
-6. If no clear title is visible above code:
-   product_name=""
 
+PRODUCT NAME EXTRACTION RULES (STRICT):
+
+1. Extract product_name exactly as written only if a clear unique model/collection title is visible.
+2. Keep numbers and dimensions if they are part of the product name.
+3. Ignore generic section/category titles.
+4. If format is NAME | CATEGORY → extract only NAME.
+5. Keep numbers appearing before or after the name unchanged.
+6. Remove any finish/material specification from product_name.
+7. If no clear product title is visible → product_name=""
 
 
 ROW SPLIT RULES:
@@ -141,12 +238,76 @@ ROW SPLIT RULES:
 Numeric rules:
 - length_cm, breath_cm, height_cm, seat_height_cm -> numeric-only strings.
 
-PRICE RULES:
-- currency: USD/EURO/INR/GBP
+
+
+
+PRICE RULES:3
+- currency: USD / EURO / INR / GBP
 - if currency is not visible, currency=""
-- price: string; digits + optional single decimal point only (no symbols/spaces)
-- If the visible price contains a decimal point ".", MUST keep it in output (do not remove ".")
-- if the price showing with decimal point ".", show it as it is. (5.794)
+
+- price must be returned as a string using Indian number format.
+
+EURO FORMAT CONVERSION RULE:
+European price format uses:
+"." as thousand separator
+"," as decimal separator
+
+Convert it to Indian/International format:
+"," as thousand separator
+"." as decimal separator
+
+Examples:
+12.234,00  ->  12,234.00
+5.794      ->  5,794
+1.250,50   ->  1,250.50
+
+- Remove currency symbols and spaces.
+- Keep digits, thousand separators, and a single decimal point only.
+
+
+SPECIAL FEATURE RULE:
+
+Extract "special_feature" ONLY if a real product functionality
+or design feature is clearly described.
+
+Valid examples:
+extendable mechanism, reclining system, storage function,
+rotating base, adjustable height, folding system, modular system.
+
+DO NOT extract:
+availability, stock status, production status, delivery notes,
+commercial labels or catalog notes.
+
+Examples to IGNORE:
+"In Stock", "Made by Order", "Available", "New Product",
+"Price List", "Update", "Quick Ship", "On Request".
+
+If no real functional feature is visible,
+return special_feature="".
+
+
+
+
+FULL PAGE COVERAGE RULE (CRITICAL):
+
+You MUST scan the ENTIRE page from top to bottom
+and extract ALL product rows visible on the page.
+
+Do NOT stop after extracting a few products.
+
+Many pages contain multiple separated product blocks.
+You must continue scanning until the bottom of the page.
+
+Before finishing:
+- verify that every visible product code,
+  price row, or dimension block has been extracted.
+- if multiple product sections exist, extract rows from ALL sections.
+
+Never skip products because of layout changes,
+images, spacing, or section breaks.
+
+
+
 
 
 FORBIDDEN FIELDS (must ALWAYS be empty string):
@@ -167,16 +328,19 @@ Return STRICT JSON array ONLY:
     "design": "",
     "product_code": "",
     "system_code": "",
+    "DIA":"",
     "length_cm": "",
     "breath_cm": "",
     "height_cm": "",
     "seat_height_cm": "",
-    "upholstery": "",
+    "finish_code":"",
+    "finish_specification": "",
     "currency": "",
     "price": "",
     "other_material_comments": "",
     "special_feature": "",
-    "additional_price": "",
+    "additional_price_lowest": "",
+    "additional_price_highest": "",
     "cbm": "",
     "product_weight_kg": "",
     "remark": "",
@@ -214,3 +378,12 @@ module.exports = PROMPTS;
 // BRAND NAME RULES:
 // - if brand name is visible, extract it.
 // - if brand name is not available, brand_name=""
+
+
+
+// {
+//   "brand_name": "",
+//   "pages": [
+//   { "page_number": 1, "class": "", "has_extractable_data": true/false, "confidence": 0.0 }
+//  ]
+// }

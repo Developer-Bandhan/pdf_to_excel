@@ -27,11 +27,41 @@ const PdfViewer = () => {
         }
     };
 
+    // Build a simple signature string for matching rows
+    const buildRowSignature = (row) => {
+        return [
+            row.brand_name, row.product_code, row.product_name,
+            row.design, row.length_cm, row.breath_cm, row.height_cm,
+            row.seat_height_cm, row.cbm, row.price, row.currency
+        ].map(v => String(v ?? "").trim().toLowerCase().replace(/\s+/g, "")).join("|");
+    };
+
     const fetchRows = async (type) => {
         setLoadingRows(true);
         try {
-            const res = await axios.get(`http://localhost:5000/pdfs/${id}/rows?type=${type}`);
-            setRows(res.data);
+            if (type === "all_verified") {
+                // Fetch both run1 and verified rows
+                const [run1Res, verifiedRes] = await Promise.all([
+                    axios.get(`http://localhost:5000/pdfs/${id}/rows?type=run1`),
+                    axios.get(`http://localhost:5000/pdfs/${id}/rows?type=verified`)
+                ]);
+
+                // Build a set of verified row signatures
+                const verifiedSignatures = new Set(
+                    verifiedRes.data.map(row => buildRowSignature(row))
+                );
+
+                // Mark each run1 row as verified or not
+                const mergedRows = run1Res.data.map(row => ({
+                    ...row,
+                    _isVerified: verifiedSignatures.has(buildRowSignature(row))
+                }));
+
+                setRows(mergedRows);
+            } else {
+                const res = await axios.get(`http://localhost:5000/pdfs/${id}/rows?type=${type}`);
+                setRows(res.data);
+            }
         } catch (error) {
             console.error("Failed to fetch rows", error);
         } finally {
@@ -80,7 +110,7 @@ const PdfViewer = () => {
             <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                 <div className="border-b border-gray-200 dark:border-gray-700 px-6 pt-4">
                     <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-                        {["run1", "run2", "verified"].map((tab) => (
+                        {["run1", "run2", "verified", "all_verified"].map((tab) => (
                             <button
                                 key={tab}
                                 onClick={() => setActiveTab(tab)}
@@ -95,6 +125,7 @@ const PdfViewer = () => {
                                 {tab === "run1" && "Iteration 1 (Raw)"}
                                 {tab === "run2" && "Iteration 2 (Raw)"}
                                 {tab === "verified" && "Verified Data (Clean)"}
+                                {tab === "all_verified" && "All Rows with Verified Data"}
                             </button>
                         ))}
                     </nav>
@@ -105,7 +136,7 @@ const PdfViewer = () => {
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-4">
                             <h3 className="text-lg font-medium text-gray-900 dark:text-white capitalize">
-                                {activeTab === 'verified' ? 'Verified Extraction Results' : `${activeTab} Extraction Results`}
+                                {activeTab === 'verified' ? 'Verified Extraction Results' : activeTab === 'all_verified' ? 'All Rows with Verified Status' : `${activeTab} Extraction Results`}
                             </h3>
                             <button
                                 onClick={handleDownload}

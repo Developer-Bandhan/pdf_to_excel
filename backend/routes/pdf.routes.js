@@ -106,7 +106,8 @@ router.post("/process-pdf", upload.single("pdf"), async (req, res) => {
     const run1Rows = await extractWithPlan({
       imagePaths,
       plan: context.plan,
-      brand_name: context.brand_name
+      brand_name: context.brand_name,
+      classifications: context.classifications
     });
 
     if (run1Rows.length) {
@@ -127,7 +128,8 @@ router.post("/process-pdf", upload.single("pdf"), async (req, res) => {
       run2Rows = await extractWithPlan({
         imagePaths,
         plan: context.plan,
-        brand_name: context.brand_name
+        brand_name: context.brand_name,
+        classifications: context.classifications
       });
 
       if (run2Rows.length) {
@@ -237,22 +239,15 @@ router.get("/pdfs/:id/rows", async (req, res) => {
 router.get("/pdfs/:id/download", async (req, res) => {
   try {
     const { id } = req.params;
-    const { type } = req.query; // run1, run2, verified
+    const { type } = req.query; // run1, run2, verified, all_verified
 
-    let Model;
-    if (type === "run1") Model = ProductRowRun1;
-    else if (type === "run2") Model = ProductRowRun2;
-    else if (type === "verified") Model = ProductRowVerified;
-    else return res.status(400).json({ message: "Invalid type" });
-
-    const rows = await Model.find({ pdf_id: id }).sort({ page_number: 1 });
     const pdf = await PdfDocument.findById(id);
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Extracted Data");
 
     // Define columns
-    worksheet.columns = [
+    const baseColumns = [
       { header: "Pg", key: "page_number", width: 5 },
       { header: "Brand Name", key: "brand_name", width: 22 },
       { header: "Product Name", key: "product_name", width: 35 },
@@ -260,16 +255,19 @@ router.get("/pdfs/:id/download", async (req, res) => {
       { header: "Design", key: "design", width: 22 },
       { header: "Product Code", key: "product_code", width: 22 },
       { header: "System Code", key: "system_code", width: 22 },
+      { header: "DIA", key: "DIA", width: 15 },
       { header: "L (cm)", key: "length_cm", width: 14 },
       { header: "B (cm)", key: "breath_cm", width: 14 },
       { header: "H (cm)", key: "height_cm", width: 14 },
       { header: "Seat Height (cm)", key: "seat_height_cm", width: 18 },
-      { header: "Upholstery", key: "upholstery", width: 20 },
+      { header: "Finish Code", key: "finish_code", width: 18 },
+      { header: "Finish Specification", key: "finish_specification", width: 20 },
       { header: "Currency", key: "currency", width: 12 },
       { header: "Price", key: "price", width: 14 },
       { header: "Other Material (Comments)", key: "other_material_comments", width: 30 },
       { header: "Special Features", key: "special_features", width: 25 },
-      { header: "Additional Price", key: "additional_price", width: 20 },
+      { header: "Additional Price (Lowest)", key: "additional_price_lowest", width: 20 },
+      { header: "Additional Price (Highest)", key: "additional_price_highest", width: 20 },
       { header: "CBM", key: "cbm", width: 10 },
       { header: "Product Weight (kg)", key: "product_weight_kg", width: 20 },
       { header: "Remark", key: "remark", width: 22 },
@@ -277,10 +275,62 @@ router.get("/pdfs/:id/download", async (req, res) => {
       { header: "Date", key: "date", width: 14 },
     ];
 
-    // Add rows
-    rows.forEach(row => {
-      worksheet.addRow(row);
-    });
+    if (type === "all_verified") {
+      // Fetch both run1 and verified rows
+      const [run1Rows, verifiedRows] = await Promise.all([
+        ProductRowRun1.find({ pdf_id: id }).sort({ page_number: 1 }).lean(),
+        ProductRowVerified.find({ pdf_id: id }).sort({ page_number: 1 }).lean()
+      ]);
+
+      // Build verified signatures set
+      const verifiedSignatures = new Set(
+        verifiedRows.map(row => buildRowSignature(row))
+      );
+
+      // Add Verified column
+      worksheet.columns = [
+        ...baseColumns,
+        { header: "Verified", key: "verified_status", width: 12 }
+      ];
+
+      // Yellow fill for unverified rows
+      const yellowFill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFF3CD" }
+      };
+
+      // Add rows and apply yellow fill to unverified ones
+      run1Rows.forEach(row => {
+        const isVerified = verifiedSignatures.has(buildRowSignature(row));
+        const excelRow = worksheet.addRow({
+          ...row,
+          verified_status: isVerified ? "✅ Yes" : "❌ No"
+        });
+
+        if (!isVerified) {
+          excelRow.eachCell({ includeEmpty: true }, (cell) => {
+            cell.fill = yellowFill;
+          });
+        }
+      });
+
+    } else {
+      // Original logic for run1, run2, verified
+      let Model;
+      if (type === "run1") Model = ProductRowRun1;
+      else if (type === "run2") Model = ProductRowRun2;
+      else if (type === "verified") Model = ProductRowVerified;
+      else return res.status(400).json({ message: "Invalid type" });
+
+      const rows = await Model.find({ pdf_id: id }).sort({ page_number: 1 });
+
+      worksheet.columns = baseColumns;
+
+      rows.forEach(row => {
+        worksheet.addRow(row);
+      });
+    }
 
     // Formatting
     worksheet.getRow(1).font = { bold: false };

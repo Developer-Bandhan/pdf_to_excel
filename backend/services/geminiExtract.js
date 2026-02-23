@@ -136,6 +136,7 @@ async function generateJsonWithRetry({ model, parts, maxAttempts = 3 }) {
   return null;
 }
 
+
 async function classifyPages(imageParts) {
 
   const batches = chunkArray(imageParts, CLASS_BATCH_SIZE);
@@ -245,36 +246,47 @@ async function buildExtractionPlan(classifications) {
 }
 
 
+
 function normalizeRow(row) {
   return {
     brand_name: row.brand_name ?? "",
     product_name: row.product_name ?? "",
     furniture_type: row.furniture_type ?? "",
     design: row.design ?? "",
+
     product_code: row.product_code ?? "",
-    // variant: row.variant ?? "",
     system_code: row.system_code ?? "",
+
+    DIA: row.DIA ?? "",
     length_cm: row.length_cm ?? "",
     breath_cm: row.breath_cm ?? "",
     height_cm: row.height_cm ?? "",
     seat_height_cm: row.seat_height_cm ?? "",
-    upholstery: row.upholstery ?? "",
+
+    finish_code: row.finish_code ?? "",
+    finish_specification: row.finish_specification ?? "",
+
     currency: row.currency ?? "",
     price: row.price ?? "",
+
     other_material_comments: row.other_material_comments ?? "",
     special_feature: row.special_feature ?? "",
-    additional_price: row.additional_price ?? "",
+
+    additional_price_lowest: row.additional_price_lowest ?? "",
+    additional_price_highest: row.additional_price_highest ?? "",
+
     cbm: row.cbm ?? "",
     product_weight_kg: row.product_weight_kg ?? "",
+
     remark: row.remark ?? "",
     initials: row.initials ?? "",
     date: row.date ?? "",
-  }
+  };
 }
 
 
 
-async function extractPageRowsGeneric(pages, brand_name) {
+async function extractPageRowsGeneric(pages, brand_name, product_name_context = "") {
 
   const parts = [];
 
@@ -298,8 +310,21 @@ extract brand_name ONCE from this page.
 Otherwise return "".
 `;
 
+  const productContext = product_name_context
+    ? `
+PRODUCT CONTEXT:
+Previous page product_name = "${product_name_context}"
+If a product title/header is visible on this page,
+ALWAYS extract it even if similar to previous page.
+Never suppress a visible title.
+If no new title is visible and this is a continuation, return product_name="" (system will auto-fill).
+DO NOT copy the previous product_name into output — return "" for continuation rows.
+`
+    : "";
+
+
   parts.push({
-    text: prompts.GENERIC_EXTRACTOR + brandContext
+    text: prompts.GENERIC_EXTRACTOR + brandContext + productContext
   });
 
 
@@ -360,7 +385,12 @@ async function prepareExtractionContext(imagePaths) {
 }
 
 
-async function extractWithPlan({ imagePaths, plan, brand_name }) {
+async function extractWithPlan({
+  imagePaths,
+  plan,
+  brand_name,
+  classifications
+}) {
 
   const extractPages = new Set();
 
@@ -373,8 +403,11 @@ async function extractWithPlan({ imagePaths, plan, brand_name }) {
     extractPages.delete(p);
   }
 
+  // fallback → extract all
   if (extractPages.size === 0) {
-    for (let i = 1; i <= imagePaths.length; i++) extractPages.add(i);
+    for (let i = 1; i <= imagePaths.length; i++) {
+      extractPages.add(i);
+    }
   }
 
   const extractPageList = [...extractPages]
@@ -385,25 +418,134 @@ async function extractWithPlan({ imagePaths, plan, brand_name }) {
     }))
     .filter(x => x.imgPath);
 
-  const batches = chunkArray(extractPageList, EXTRACT_BATCH_SIZE);
+
+  // Build a map: pageNo -> product_name from classifier
+  // This captures product names from SKIPPED pages (e.g. TECH_INFO_ONLY pages
+  // that have a product title but no extractable data)
+  const classificationProductNameMap = {};
+  for (const c of (classifications || [])) {
+    if (c?.page_number && c?.product_name) {
+      classificationProductNameMap[c.page_number] = c.product_name.trim();
+    }
+  }
+
   const allRows = [];
 
-  for (const batch of batches) {
-    const rows = await extractPageRowsGeneric(batch, brand_name);
+  // PRODUCT STATE ENGINE
+  let productState = {
+    name: "",
+    knownCodes: new Set(),
+    lastExtractedPage: 0
+  };
 
+  for (const { pageNo, imgPath } of extractPageList) {
+
+    // Check if any SKIPPED pages between last extracted page and this one
+    // had a product_name detected by the classifier.
+    // If so, treat that as a product boundary / new product name seed.
+    for (let skippedPage = productState.lastExtractedPage + 1; skippedPage < pageNo; skippedPage++) {
+      const skippedName = classificationProductNameMap[skippedPage];
+      if (skippedName) {
+        console.log(`[ProductState] Skipped page ${skippedPage} had product_name: "${skippedName}" — updating state.`);
+        // A skipped page with a product name means a new product section started.
+        // Reset codes (new product) but carry the name forward.
+        productState = {
+          name: skippedName,
+          knownCodes: new Set(),
+          lastExtractedPage: productState.lastExtractedPage
+        };
+      }
+    }
+
+    const classifierName = classificationProductNameMap[pageNo];
+
+    if (
+      classifierName &&
+      classifierName !== productState.name
+    ) {
+      console.log(
+        `[Boundary] New product from classifier on page ${pageNo}: ${classifierName}`
+      );
+
+      productState = {
+        name: classifierName,
+        knownCodes: new Set(),
+        lastExtractedPage: productState.lastExtractedPage
+      };
+    }
+
+    const rows = await extractPageRowsGeneric(
+      [{ pageNo, imgPath }],
+      brand_name,
+      productState.name
+    );
+
+    productState.lastExtractedPage = pageNo;
+
+    if (!rows.length) continue;
+
+    // detect brand once
     if (!brand_name) {
-      const detected = rows.find(r => r.brand_name);
-      if (detected?.brand_name) {
-        brand_name = detected.brand_name.trim();
+      const detectedBrand = rows.find(r => r.brand_name);
+      if (detectedBrand?.brand_name) {
+        brand_name = detectedBrand.brand_name.trim();
         console.log("Brand auto-detected:", brand_name);
       }
     }
 
+    const detectedNames = rows.map(r => r.product_name).filter(Boolean);
+
+    const detectedCodes = rows.map(r => r.product_code).filter(Boolean);
+
+    // PRODUCT BOUNDARY DETECTION
+    // Rule 1: A genuinely NEW product name appeared on this page
+    const hasNewName = detectedNames.length > 0 && productState.name && !detectedNames.includes(productState.name);
+
+    // Rule 2: New unseen product codes appeared (possible new product)
+    const hasNewCodes = detectedCodes.some(c => !productState.knownCodes.has(c)) && productState.knownCodes.size > 0;
+
+    if (hasNewName) {
+      // Definite new product — reset everything, new name will be picked up below
+      productState = {
+        name: "",
+        knownCodes: new Set(),
+        lastExtractedPage: pageNo
+      };
+    } else if (hasNewCodes && !detectedNames.length) {
+      // New codes but NO new name visible → likely continuation of same product
+      // (e.g. page 2 of same product with more variants)
+      // Keep the existing product name, just reset codes so we track new ones
+      productState = {
+        name: productState.name,   // carry forward existing name
+        knownCodes: new Set(),
+        lastExtractedPage: pageNo
+      };
+    } else if (hasNewCodes && detectedNames.length) {
+      // New codes AND a new name → definitely new product
+      productState = {
+        name: "",
+        knownCodes: new Set(),
+        lastExtractedPage: pageNo
+      };
+    }
+
+    // Update state name: prefer newly detected name, else keep existing
+    if (detectedNames.length) {
+      productState.name = detectedNames[0].trim();
+    }
+    // If still no name, productState.name stays as whatever it was (carry-forward)
+
+    detectedCodes.forEach(c =>
+      productState.knownCodes.add(c)
+    );
+
+    // merge rows — always fill empty product_name with current state name
     allRows.push(
-      ...rows.map(row => ({
-        ...row,
-        brand_name: row.brand_name || brand_name || "",
-        page_number: batch[0]?.pageNo ?? null
+      ...rows.map(r => ({
+        ...r,
+        product_name: r.product_name ? r.product_name : (detectedNames.length === 0 ? productState.name : ""),
+        brand_name: r.brand_name || brand_name || "",
+        page_number: pageNo
       }))
     );
   }
@@ -413,68 +555,6 @@ async function extractWithPlan({ imagePaths, plan, brand_name }) {
 
 
 
-// async function geminiExtractPDF(imagePaths) {
-
-//   resetTokenUsage();
-
-//   const { classifications, brand_name } = await classifyPages(imagePaths);
-
-//   const plan = await buildExtractionPlan(classifications);
-
-//   const extractPages = new Set();
-
-//   // for (const key of Object.keys(plan.extract || {})) {
-//   //   for (const p of plan.extract[key] || []) extractPages.add(p);
-//   // }
-
-//   for (const [type, pages] of Object.entries(plan.extract || {})) {
-//     if (NON_EXTRACTABLE_TYPES.has(type)) continue;
-
-//     for (const p of pages || []) {
-//       if (MANUAL_SKIP_PAGES.has(p)) continue;
-//       extractPages.add(p);
-//     }
-//   }
-
-//   for (const p of plan.skip_pages || []) {
-//     extractPages.delete(p);
-//   }
-
-//   if (extractPages.size === 0) {
-//     for (let i = 1; i <= imagePaths.length; i++) extractPages.add(i);
-//   }
-
-//   const allRows = [];
-
-//   const extractPageList = [...extractPages]
-//     .sort((a, b) => a - b)
-//     .map((pageNo) => ({
-//       pageNo,
-//       imgPath: imagePaths[pageNo - 1],
-//     }))
-//     .filter((x) => x.imgPath);
-
-//   const batches = chunkArray(extractPageList, EXTRACT_BATCH_SIZE);
-
-//   for (const batch of batches) {
-//     sendEvent("log", `Extracting data from batch... (${batch.length} pages)`);
-//     const rows = await extractPageRowsGeneric(batch);
-
-//     const patchedRows = rows.map((row) => ({
-//       ...row,
-//       brand_name: row.brand_name || brand_name || "",
-//       page_number: batch[0]?.pageNo ?? null
-//     }));
-
-//     allRows.push(...patchedRows);
-//   }
-
-
-//   return {
-//     rows: allRows,
-//     token_usage: getTokenUsage()
-//   };
-// }
 
 
 module.exports = {

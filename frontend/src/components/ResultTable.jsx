@@ -19,16 +19,19 @@ const ResultTable = ({ data, type }) => {
         { label: "Design", key: "design", width: "w-26" },
         { label: "Product Code", key: "product_code", width: "w-26 font-mono text-xs" },
         { label: "System Code", key: "system_code", width: "w-26 font-mono text-xs" },
+        { label: "DIA", key: "DIA", width: "w-18" },
         { label: "L (cm)", key: "length_cm", width: "w-18" },
         { label: "B (cm)", key: "breath_cm", width: "w-18" },
         { label: "H (cm)", key: "height_cm", width: "w-18" },
         { label: "Seat Height (cm)", key: "seat_height_cm", width: "w-18" },
-        { label: "Upholstery", key: "upholstery", width: "w-22" },
+        { label: "Finish Code", key: "finish_code", width: "w-22" },
+        { label: "Finish Specification", key: "finish_specification", width: "w-22" },
         { label: "Currency", key: "currency", width: "w-14" },
         { label: "Price", key: "price", width: "w-20 font-semibold" },
         { label: "Other Material (Comments)", key: "other_material_comments", width: "w-22" },
         { label: "Special Feature", key: "special_feature", width: "w-22" },
-        { label: "Additional Price", key: "additional_price", width: "w-18" },
+        { label: "Additional Price (Lowest)", key: "additional_price_lowest", width: "w-18" },
+        { label: "Additional Price (Highest)", key: "additional_price_highest", width: "w-18" },
         { label: "CBM", key: "cbm", width: "w-18" },
         { label: "Product Weight (kg)", key: "product_weight_kg", width: "w-18" },
         { label: "Remark", key: "remark", width: "w-32 truncate" },
@@ -36,6 +39,10 @@ const ResultTable = ({ data, type }) => {
 
     if (type === "verified") {
         columns.push({ label: "Verified", key: "is_verified", render: (val) => val ? "✅" : "❌" });
+    }
+
+    if (type === "all_verified") {
+        columns.push({ label: "Verified", key: "_isVerified", render: (val) => val ? "✅" : "❌" });
     }
 
 
@@ -57,7 +64,10 @@ const ResultTable = ({ data, type }) => {
                 </thead>
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                     {data.map((row, rowIdx) => (
-                        <tr key={row._id || rowIdx} className="hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors">
+                        <tr key={row._id || rowIdx} className={`transition-colors ${type === "all_verified" && row._isVerified === false
+                            ? "bg-yellow-50 hover:bg-yellow-100 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/30"
+                            : "hover:bg-blue-50 dark:hover:bg-blue-900/10"
+                            }`}>
                             {columns.map((col, colIdx) => (
                                 <td
                                     key={`${rowIdx}-${colIdx}`}

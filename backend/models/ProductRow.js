@@ -34,6 +34,10 @@ const productRowSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    DIA: {
+        type: String,
+        default: ""
+    },
     length_cm: {
         type: String,
         default: ""
@@ -50,7 +54,11 @@ const productRowSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-    upholstery: {
+    finish_code: {
+        type: String,
+        default: ""
+    },
+    finish_specification: {
         type: String,
         default: ""
     },
@@ -62,7 +70,7 @@ const productRowSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-    other_material: {
+    other_material_comments: {
         type: String,
         default: ""
     },
@@ -70,7 +78,11 @@ const productRowSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
-    additional_price: {
+    additional_price_lowest: {
+        type: String,
+        default: ""
+    },
+    additional_price_highest: {
         type: String,
         default: ""
     },
@@ -95,9 +107,9 @@ const productRowSchema = new mongoose.Schema({
         default: ""
     },
     is_verified: {
-    type: Boolean,
-    default: false
-  }
+        type: Boolean,
+        default: false
+    }
 }, { timestamps: true });
 
 productRowSchema.index({ pdf_id: 1, product_code: 1 });
@@ -106,21 +118,21 @@ productRowSchema.index({ pdf_id: 1, product_code: 1 });
 
 
 module.exports = {
-  ProductRowRun1: mongoose.model(
-    "ProductRowRun1",
-    productRowSchema,
-    "product_rows_run1"
-  ),
+    ProductRowRun1: mongoose.model(
+        "ProductRowRun1",
+        productRowSchema,
+        "product_rows_run1"
+    ),
 
-  ProductRowRun2: mongoose.model(
-    "ProductRowRun2",
-    productRowSchema,
-    "product_rows_run2"
-  ),
+    ProductRowRun2: mongoose.model(
+        "ProductRowRun2",
+        productRowSchema,
+        "product_rows_run2"
+    ),
 
-  ProductRowVerified: mongoose.model(
-    "ProductRowVerified",
-    productRowSchema,
-    "product_rows_verified"
-  )
+    ProductRowVerified: mongoose.model(
+        "ProductRowVerified",
+        productRowSchema,
+        "product_rows_verified"
+    )
 };
