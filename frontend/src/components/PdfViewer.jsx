@@ -32,7 +32,7 @@ const PdfViewer = () => {
         return [
             row.brand_name, row.product_code, row.product_name,
             row.design, row.length_cm, row.breath_cm, row.height_cm,
-            row.seat_height_cm, row.cbm, row.price, row.currency
+            row.seat_height_cm, row.upholstery, row.cbm, row.price, row.currency
         ].map(v => String(v ?? "").trim().toLowerCase().replace(/\s+/g, "")).join("|");
     };
 

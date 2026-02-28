@@ -93,6 +93,9 @@ async function generateJsonWithRetry({ model, parts, maxAttempts = 3 }) {
       const res = await ai.models.generateContent({
         model,
         contents: [{ role: "user", parts }],
+        config: {
+          temperature: 0.1
+        }
       });
 
       trackTokens(model, res.usageMetadata);
@@ -120,7 +123,8 @@ async function generateJsonWithRetry({ model, parts, maxAttempts = 3 }) {
         ];
       }
     } catch (err) {
-      console.error(`Gemini Call Error (Attempt ${attempt}/${maxAttempts}): ${err.message}`);
+      const errorMsg = err.cause ? `${err.message} (Cause: ${err.cause.message || err.cause})` : err.message;
+      console.error(`Gemini Call Error (Attempt ${attempt}/${maxAttempts}): ${errorMsg}`);
 
       if (attempt === maxAttempts) {
         sendEvent("log", `Max attempts reached. Failed to get response from Gemini.`);
@@ -259,10 +263,13 @@ function normalizeRow(row) {
 
     DIA: row.DIA ?? "",
     length_cm: row.length_cm ?? "",
+    length_2_cm: row.length_2_cm ?? "",
+    length_3_cm: row.length_3_cm ?? "",
     breath_cm: row.breath_cm ?? "",
     height_cm: row.height_cm ?? "",
     seat_height_cm: row.seat_height_cm ?? "",
 
+    upholstery: row.upholstery ?? "",
     finish_code: row.finish_code ?? "",
     finish_specification: row.finish_specification ?? "",
 
@@ -352,10 +359,7 @@ DO NOT copy the previous product_name into output — return "" for continuation
 
   const strict = extractStrictJson(jsonText);
 
-  console.log("RAW STRICT JSON:\n", strict);
-
   if (!strict) return [];
-
 
   let parsed;
   try {
@@ -385,22 +389,137 @@ async function prepareExtractionContext(imagePaths) {
 }
 
 
+
+async function validatePageRows({ imgPath, pageNo, rows }) {
+
+  if (!rows.length) return [];
+
+  const parts = [];
+
+  parts.push({
+    text: prompts.VALIDATOR_PROMPT
+  });
+
+  parts.push({
+    text: `
+IMPORTANT:
+- row_id is fixed. Never reorder rows.
+- Validate ONLY against this page.
+- CURRENT PAGE_NUMBER: ${pageNo}
+`.trim()
+  });
+
+  // send rows to validator
+  parts.push({
+    text: `ROWS_TO_VALIDATE:\n${JSON.stringify(
+      rows.map((r, i) => ({
+        row_id: i,
+        product_code: r.product_code,
+        furniture_type: r.furniture_type,
+        DIA: r.DIA,
+        length_cm: r.length_cm,
+        length_2_cm: r.length_2_cm,
+        length_3_cm: r.length_3_cm,
+        breath_cm: r.breath_cm,
+        height_cm: r.height_cm,
+        seat_height_cm: r.seat_height_cm,
+        upholstery: r.upholstery,
+        finish_code: r.finish_code,
+        finish_specification: r.finish_specification,
+        price: r.price,
+        other_material_comments: r.other_material_comments,
+        special_feature: r.special_feature,
+        cbm: r.cbm,
+        product_weight_kg: r.product_weight_kg,
+      }))
+    )}`
+  });
+
+  const buffer = await fs.readFile(imgPath);
+
+  parts.push({
+    inlineData: {
+      data: buffer.toString("base64"),
+      mimeType: "image/png",
+    }
+  });
+
+  const jsonText = await generateJsonWithRetry({
+    model: process.env.GEMINI_MODEL,
+    parts
+  });
+
+  console.log("JSON TEXT:", jsonText);
+
+  if (!jsonText) return rows;
+
+
+  let result;
+  try {
+    result = JSON.parse(extractStrictJson(jsonText));
+  } catch {
+    return rows;
+  }
+
+  // If Gemini returned a non-array (e.g. { "message": "no invalid field found" })
+  // → all rows are valid
+  if (!Array.isArray(result)) {
+    return rows.map(row => ({ 
+      ...row,
+      validation_status: "valid",
+      invalid_fields: []
+    }));
+  }
+
+  // const validMap = new Map(
+  //   result.map(x => [x.row_id, x.valid])
+  // );
+
+  const invalidRowMap = new Map(
+    result.map(x => [x.row_id, x.invalid_fields || []])
+  );
+
+  // keep only valid rows
+  // return rows.filter((_, i) => validMap.get(i));
+
+  return rows.map((row, i) => {
+    const invalidFields = invalidRowMap.get(i);
+
+    return {
+      ...row,
+      validation_status: invalidFields ? "invalid" : "valid",
+      invalid_fields: invalidFields || []
+    };
+  });
+
+}
+
+
 async function extractWithPlan({
   imagePaths,
   plan,
   brand_name,
-  classifications
+  classifications,
+  isValidationEnabled = false
 }) {
 
   const extractPages = new Set();
 
   for (const [type, pages] of Object.entries(plan.extract || {})) {
     if (NON_EXTRACTABLE_TYPES.has(type)) continue;
-    for (const p of pages || []) extractPages.add(p);
+    for (const p of pages || []) {
+      const pageNo = typeof p === 'object' && p !== null ? p.page_number : p;
+      if (typeof pageNo === 'number' || typeof pageNo === 'string') {
+        extractPages.add(Number(pageNo));
+      }
+    }
   }
 
   for (const p of plan.skip_pages || []) {
-    extractPages.delete(p);
+    const pageNo = typeof p === 'object' && p !== null ? p.page_number : p;
+    if (typeof pageNo === 'number' || typeof pageNo === 'string') {
+      extractPages.delete(Number(pageNo));
+    }
   }
 
   // fallback → extract all
@@ -474,13 +593,28 @@ async function extractWithPlan({
       };
     }
 
-    const rows = await extractPageRowsGeneric(
+    let rows = await extractPageRowsGeneric(
       [{ pageNo, imgPath }],
       brand_name,
       productState.name
     );
 
     productState.lastExtractedPage = pageNo;
+
+    if (!rows.length) continue;
+
+
+    if (isValidationEnabled) {
+      rows = await validatePageRows({ imgPath, pageNo, rows });
+
+      const totalExtracted = rows.length;
+      const totalValid = rows.filter(r => r.validation_status === "valid").length;
+      sendEvent("log", `Page ${pageNo}: Extracted ${totalExtracted} rows. Validated ${totalValid} rows.`);
+    } else {
+      rows = rows.map(r => ({ ...r, validation_status: "valid" }));
+      sendEvent("log", `Page ${pageNo}: Extracted ${rows.length} rows (Validation skipped).`);
+    }
+
 
     if (!rows.length) continue;
 
@@ -540,14 +674,21 @@ async function extractWithPlan({
     );
 
     // merge rows — always fill empty product_name with current state name
+    let tempProductName = productState.name;
     allRows.push(
-      ...rows.map(r => ({
-        ...r,
-        product_name: r.product_name ? r.product_name : (detectedNames.length === 0 ? productState.name : ""),
-        brand_name: r.brand_name || brand_name || "",
-        page_number: pageNo
-      }))
+      ...rows.map(r => {
+        if (r.product_name && r.product_name.trim() !== "") {
+          tempProductName = r.product_name.trim();
+        }
+        return {
+          ...r,
+          product_name: tempProductName,
+          brand_name: r.brand_name || brand_name || "",
+          page_number: pageNo
+        };
+      })
     );
+    productState.name = tempProductName;
   }
 
   return allRows;

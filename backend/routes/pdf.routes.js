@@ -101,13 +101,15 @@ router.post("/process-pdf", upload.single("pdf"), async (req, res) => {
     const context = await prepareExtractionContext(imagePaths);
 
     const isDual = req.body.isDualExtraction === 'true' || req.body.isDualExtraction === true;
+    const isValidationEnabled = req.body.isValidationEnabled === 'true' || req.body.isValidationEnabled === true;
 
     sendEvent("log", "Extraction run 1...");
     const run1Rows = await extractWithPlan({
       imagePaths,
       plan: context.plan,
       brand_name: context.brand_name,
-      classifications: context.classifications
+      classifications: context.classifications,
+      isValidationEnabled
     });
 
     if (run1Rows.length) {
@@ -129,7 +131,8 @@ router.post("/process-pdf", upload.single("pdf"), async (req, res) => {
         imagePaths,
         plan: context.plan,
         brand_name: context.brand_name,
-        classifications: context.classifications
+        classifications: context.classifications,
+        isValidationEnabled
       });
 
       if (run2Rows.length) {
@@ -256,10 +259,13 @@ router.get("/pdfs/:id/download", async (req, res) => {
       { header: "Product Code", key: "product_code", width: 22 },
       { header: "System Code", key: "system_code", width: 22 },
       { header: "DIA", key: "DIA", width: 15 },
-      { header: "L (cm)", key: "length_cm", width: 14 },
+      { header: "L1 (cm)", key: "length_cm", width: 14 },
+      { header: "L2 (cm)", key: "length_2_cm", width: 14 },
+      { header: "L3 (cm)", key: "length_3_cm", width: 14 },
       { header: "B (cm)", key: "breath_cm", width: 14 },
       { header: "H (cm)", key: "height_cm", width: 14 },
       { header: "Seat Height (cm)", key: "seat_height_cm", width: 18 },
+      { header: "Upholstery", key: "upholstery", width: 22 },
       { header: "Finish Code", key: "finish_code", width: 18 },
       { header: "Finish Specification", key: "finish_specification", width: 20 },
       { header: "Currency", key: "currency", width: 12 },
@@ -293,14 +299,14 @@ router.get("/pdfs/:id/download", async (req, res) => {
         { header: "Verified", key: "verified_status", width: 12 }
       ];
 
-      // Yellow fill for unverified rows
+      // Yellow fill for invalid fields
       const yellowFill = {
         type: "pattern",
         pattern: "solid",
         fgColor: { argb: "FFFFF3CD" }
       };
 
-      // Add rows and apply yellow fill to unverified ones
+      // Add rows and apply yellow fill to invalid fields
       run1Rows.forEach(row => {
         const isVerified = verifiedSignatures.has(buildRowSignature(row));
         const excelRow = worksheet.addRow({
@@ -308,9 +314,13 @@ router.get("/pdfs/:id/download", async (req, res) => {
           verified_status: isVerified ? "✅ Yes" : "❌ No"
         });
 
-        if (!isVerified) {
-          excelRow.eachCell({ includeEmpty: true }, (cell) => {
-            cell.fill = yellowFill;
+        if (row.validation_status === "invalid" && Array.isArray(row.invalid_fields)) {
+          row.invalid_fields.forEach(fieldKey => {
+            const col = worksheet.getColumn(fieldKey);
+            if (col) {
+              const cell = excelRow.getCell(col.number);
+              cell.fill = yellowFill;
+            }
           });
         }
       });
@@ -323,12 +333,28 @@ router.get("/pdfs/:id/download", async (req, res) => {
       else if (type === "verified") Model = ProductRowVerified;
       else return res.status(400).json({ message: "Invalid type" });
 
-      const rows = await Model.find({ pdf_id: id }).sort({ page_number: 1 });
+      const rows = await Model.find({ pdf_id: id }).sort({ page_number: 1 }).lean();
 
       worksheet.columns = baseColumns;
 
+      const yellowFill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFFFF3CD" }
+      };
+
       rows.forEach(row => {
-        worksheet.addRow(row);
+        const excelRow = worksheet.addRow(row);
+
+        if (row.validation_status === "invalid" && Array.isArray(row.invalid_fields)) {
+          row.invalid_fields.forEach(fieldKey => {
+            const col = worksheet.getColumn(fieldKey);
+            if (col) {
+              const cell = excelRow.getCell(col.number);
+              cell.fill = yellowFill;
+            }
+          });
+        }
       });
     }
 

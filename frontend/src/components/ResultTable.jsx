@@ -20,10 +20,13 @@ const ResultTable = ({ data, type }) => {
         { label: "Product Code", key: "product_code", width: "w-26 font-mono text-xs" },
         { label: "System Code", key: "system_code", width: "w-26 font-mono text-xs" },
         { label: "DIA", key: "DIA", width: "w-18" },
-        { label: "L (cm)", key: "length_cm", width: "w-18" },
+        { label: "L1 (cm)", key: "length_cm", width: "w-18" },
+        { label: "L2 (cm)", key: "length_2_cm", width: "w-18" },
+        { label: "L3 (cm)", key: "length_3_cm", width: "w-18" },
         { label: "B (cm)", key: "breath_cm", width: "w-18" },
         { label: "H (cm)", key: "height_cm", width: "w-18" },
         { label: "Seat Height (cm)", key: "seat_height_cm", width: "w-18" },
+        { label: "Upholstery", key: "upholstery", width: "w-22" },
         { label: "Finish Code", key: "finish_code", width: "w-22" },
         { label: "Finish Specification", key: "finish_specification", width: "w-22" },
         { label: "Currency", key: "currency", width: "w-14" },
@@ -62,21 +65,22 @@ const ResultTable = ({ data, type }) => {
                         ))}
                     </tr>
                 </thead>
+                {/* (type === "all_verified" && row._isVerified === false) || */}
                 <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                     {data.map((row, rowIdx) => (
-                        <tr key={row._id || rowIdx} className={`transition-colors ${type === "all_verified" && row._isVerified === false
-                            ? "bg-yellow-50 hover:bg-yellow-100 dark:bg-yellow-900/20 dark:hover:bg-yellow-900/30"
-                            : "hover:bg-blue-50 dark:hover:bg-blue-900/10"
-                            }`}>
-                            {columns.map((col, colIdx) => (
-                                <td
-                                    key={`${rowIdx}-${colIdx}`}
-                                    className={`px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300 ${col.width || ""}`}
-                                    title={col.key === 'remark' ? row[col.key] : ''}
-                                >
-                                    {col.render ? col.render(row[col.key], rowIdx) : (row[col.key] || "-")}
-                                </td>
-                            ))}
+                        <tr key={row._id || rowIdx} className="hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors">
+                            {columns.map((col, colIdx) => {
+                                const isInvalid = row.validation_status === "invalid" && Array.isArray(row.invalid_fields) && row.invalid_fields.includes(col.key);
+                                return (
+                                    <td
+                                        key={`${rowIdx}-${colIdx}`}
+                                        className={`px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300 ${col.width || ""} ${isInvalid ? "bg-yellow-200 dark:bg-yellow-900/40" : ""}`}
+                                        title={col.key === 'remark' ? row[col.key] : ''}
+                                    >
+                                        {col.render ? col.render(row[col.key], rowIdx) : (row[col.key] || "-")}
+                                    </td>
+                                );
+                            })}
                         </tr>
                     ))}
                 </tbody>

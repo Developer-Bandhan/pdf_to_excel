@@ -42,6 +42,14 @@ const productRowSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    length_2_cm: {
+        type: String,
+        default: ""
+    },
+    length_3_cm: {
+        type: String,
+        default: ""
+    },
     breath_cm: {
         type: String,
         default: ""
@@ -51,6 +59,10 @@ const productRowSchema = new mongoose.Schema({
         default: ""
     },
     seat_height_cm: {
+        type: String,
+        default: ""
+    },
+    upholstery: {
         type: String,
         default: ""
     },
@@ -106,9 +118,19 @@ const productRowSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+
+    invalid_fields: {
+        type: [String],
+        default: []
+    },
+
     is_verified: {
         type: Boolean,
         default: false
+    },
+    validation_status: {
+        type: String,
+        default: "valid"
     }
 }, { timestamps: true });
 
