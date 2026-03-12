@@ -84,6 +84,82 @@ function extractStrictJson(text) {
   return cleanedText.substring(start, end + 1).trim();
 }
 
+async function reconcileExtractedRows({ imgPath, pageNo, rows, brand_name = "", product_name_context = "" }) {
+  if (!rows.length) return rows;
+
+  const parts = [];
+
+  const brandContext = brand_name
+    ? `
+DOCUMENT CONTEXT:
+Catalog Brand: ${brand_name}
+Brand already known.
+Always return "brand_name": "".
+`
+    : "";
+
+
+
+  const productContext = product_name_context
+    ? `
+PRODUCT CONTEXT:
+Previous page product_name = "${product_name_context}"
+
+If page is continuation → product_name=""
+System will auto-fill later.
+`
+    : "";
+
+  parts.push({
+    text:
+      prompts.GENERIC_EXTRACTOR +      // SAME extraction rules
+      "\n\n--- CORRECTION MODE ---\n\n" +
+      prompts.RECONCILIATION_PROMPT +
+      brandContext +
+      productContext
+  });
+
+  parts.push({
+    text: `
+CURRENT PAGE_NUMBER: ${pageNo}
+ROW COUNT PROVIDED: ${rows.length}
+
+If visually more price rows exist than this count,
+append missing rows.
+`
+  });
+
+  parts.push({
+    text: `EXTRACTED_ROWS:\n${JSON.stringify(rows)}`
+  });
+
+  const buffer = await fs.readFile(imgPath);
+
+  parts.push({
+    inlineData: {
+      data: buffer.toString("base64"),
+      mimeType: "image/png"
+    }
+  });
+
+  const jsonText = await generateJsonWithRetry({
+    model: process.env.GEMINI_MODEL_RECONCILE,
+    parts
+  });
+
+  if (!jsonText) return rows;
+
+  try {
+    const parsed = JSON.parse(extractStrictJson(jsonText));
+    if (Array.isArray(parsed)) {
+      return parsed.map(normalizeRow);
+    }
+  } catch (error) {
+
+  }
+
+  return rows;
+}
 
 async function generateJsonWithRetry({ model, parts, maxAttempts = 3 }) {
   let last = null;
@@ -445,7 +521,7 @@ IMPORTANT:
   });
 
   const jsonText = await generateJsonWithRetry({
-    model: process.env.GEMINI_MODEL,
+    model: process.env.GEMINI_CLASSIFIER_MODEL,
     parts
   });
 
@@ -464,7 +540,7 @@ IMPORTANT:
   // If Gemini returned a non-array (e.g. { "message": "no invalid field found" })
   // → all rows are valid
   if (!Array.isArray(result)) {
-    return rows.map(row => ({ 
+    return rows.map(row => ({
       ...row,
       validation_status: "valid",
       invalid_fields: []
@@ -493,6 +569,8 @@ IMPORTANT:
   });
 
 }
+
+const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 
 async function extractWithPlan({
@@ -593,11 +671,27 @@ async function extractWithPlan({
       };
     }
 
+    // console.log(`[Page ${pageNo}] Waiting 5 seconds before Extraction...`);
+    // await delay(5000);
     let rows = await extractPageRowsGeneric(
       [{ pageNo, imgPath }],
       brand_name,
       productState.name
     );
+
+    // console.log(`[Page ${pageNo}] Waiting 5 seconds before Reconcile...`);
+    // await delay(5000);
+
+    rows = await reconcileExtractedRows({
+      imgPath,
+      pageNo,
+      rows,
+      brand_name,
+      product_name_context: productState.name
+    });
+
+    // console.log(`\n\n[Page ${pageNo}] --- AFTER RECONCILE ---`);
+    // console.log(JSON.stringify(rows, null, 2));
 
     productState.lastExtractedPage = pageNo;
 
@@ -605,6 +699,10 @@ async function extractWithPlan({
 
 
     if (isValidationEnabled) {
+
+      // console.log(`[Page ${pageNo}] Waiting 5 seconds before Validation...`);
+      // await delay(5000);
+
       rows = await validatePageRows({ imgPath, pageNo, rows });
 
       const totalExtracted = rows.length;

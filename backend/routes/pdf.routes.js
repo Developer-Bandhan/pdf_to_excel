@@ -152,6 +152,11 @@ router.post("/process-pdf", upload.single("pdf"), async (req, res) => {
       verifiedRows = run1Rows.map(r => ({ ...r, is_verified: true }));
     }
 
+    // const verifiedRows = run1Rows.map(r => ({
+    //   ...r,
+    //   is_verified: true
+    // }));
+
     sendEvent("log", "Verified rows: " + verifiedRows.length);
 
     if (verifiedRows.length) {

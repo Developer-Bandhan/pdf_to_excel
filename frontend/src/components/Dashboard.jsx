@@ -9,7 +9,7 @@ const Dashboard = () => {
     const [loading, setLoading] = useState(false);
     const [logs, setLogs] = useState([]);
     const [isDualExtraction, setIsDualExtraction] = useState(false);
-    const [isValidationEnabled, setIsValidationEnabled] = useState(false);
+    const [isValidationEnabled, setIsValidationEnabled] = useState(true);
     const [seconds, setSeconds] = useState(0);
     const [stats, setStats] = useState({
         byModel: {},
@@ -146,7 +146,7 @@ const Dashboard = () => {
                         </div>
 
                         <div className="mt-6 flex flex-col gap-4">
-                            <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
+                            {/* <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
                                 <div>
                                     <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Dual Extraction</p>
                                 </div>
@@ -158,7 +158,7 @@ const Dashboard = () => {
                                         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isDualExtraction ? 'translate-x-6' : 'translate-x-1'}`}
                                     />
                                 </button>
-                            </div>
+                            </div> */}
 
                             <div className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-100 dark:border-amber-800/50">
                                 <div>

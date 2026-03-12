@@ -5,7 +5,7 @@ const { exec } = require("child_process");
 function pdfToImages(pdfPath, outputDir) {
   return new Promise((resolve, reject) => {
     const outputPrefix = path.join(outputDir, "page");
-    const command = `pdftoppm -png -r 200 "${pdfPath}" "${outputPrefix}"`;
+    const command = `pdftoppm -jpeg -jpegopt quality=90 -gray -r 200 "${pdfPath}" "${outputPrefix}"`;
 
     exec(command, async (error) => {
       if (error) return reject(error);
@@ -13,7 +13,7 @@ function pdfToImages(pdfPath, outputDir) {
       try {
         const files = await fs.readdir(outputDir);
         const images = files
-          .filter((f) => f.endsWith(".png"))
+          .filter((f) => f.endsWith(".jpg"))
           .sort()
           .map((f) => path.join(outputDir, f));
 
